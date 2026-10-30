@@ -22,7 +22,7 @@ input:focus,button:focus-visible,summary:focus-visible{outline:3px solid var(--a
 .row{display:flex;gap:8px}.row>*{flex:1}
 button{font:inherit;font-weight:600;border:0;border-radius:8px;padding:10px 14px;background:var(--accent);color:var(--onaccent);cursor:pointer}
 button.alt{background:transparent;color:var(--ink);border:1px solid var(--line)}
-#reader{margin-top:10px;border-radius:8px;overflow:hidden}
+#reader{margin-top:10px;border-radius:8px;overflow:hidden;position:relative}#reader video{width:100%;display:block}#reader canvas.drawingBuffer{position:absolute;left:0;top:0;width:100%;height:100%}
 .msg{margin:10px 0 0;min-height:1.2em;color:var(--mute)}.msg.err{color:var(--bad)}
 .hit{display:flex;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
 .hit:first-child{border-top:0}
@@ -71,12 +71,12 @@ li.c{padding:9px 0;border-top:1px solid var(--line)}li.c:first-child{border-top:
 <ul id="list" style="margin-top:8px"></ul>
 </main>
 
-<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.8.4/dist/quagga.min.js"></script>
 <script>
 const $ = id => document.getElementById(id);
 const store = { get: k => { try { return localStorage.getItem(k) || '' } catch (e) { return '' } },
                 set: (k, v) => { try { localStorage.setItem(k, v) } catch (e) {} } };
-let results = [], scanner = null, collection = [];
+let results = [], collection = [];
 
 $('url').value = store.get('url'); $('token').value = store.get('token');
 if (!store.get('url')) $('settings').open = true;
@@ -149,34 +149,50 @@ $('mSave').onclick = () => {
 $('go').onclick = () => $('code').value.trim() && lookup($('code').value.trim());
 $('code').onkeydown = e => { if (e.key === 'Enter') $('go').click(); };
 
-$('cam').onclick = async () => {
-  if (scanner) { await scanner.stop().catch(() => {}); scanner = null; $('reader').textContent = ''; $('cam').textContent = 'Scan with camera'; return; }
-  const F = Html5QrcodeSupportedFormats;
-  scanner = new Html5Qrcode('reader', { formatsToSupport: [F.UPC_A, F.EAN_13, F.UPC_E, F.EAN_8] });
-  $('cam').textContent = 'Stop camera';
-  try {
-    await scanner.start({ facingMode: 'environment' }, {
-      fps: 15,
-      qrbox: (w, h) => ({ width: Math.floor(w * 0.9), height: Math.floor(Math.min(h * 0.5, w * 0.5)) }),
-      videoConstraints: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
-    }, async text => {
-      await scanner.stop().catch(() => {}); scanner = null; $('reader').textContent = ''; $('cam').textContent = 'Scan with camera';
-      $('code').value = text; lookup(text);
-    });
-  } catch (e) { scanner = null; $('cam').textContent = 'Scan with camera'; say('Camera unavailable: ' + e, true); }
+let live = false;
+const READERS = ['ean_reader', 'upc_reader', 'ean_8_reader', 'upc_e_reader'];
+function stopCam() {
+  if (live) { try { Quagga.stop(); } catch (e) {} live = false; }
+  $('reader').textContent = ''; $('cam').textContent = 'Scan with camera';
+}
+function accept(text) { stopCam(); $('code').value = text; lookup(text); }
+
+$('cam').onclick = () => {
+  if (live) return stopCam();
+  live = true; $('cam').textContent = 'Stop camera';
+  const hits = {};
+  Quagga.offDetected();
+  Quagga.onDetected(r => {
+    const c = r.codeResult.code; hits[c] = (hits[c] || 0) + 1;
+    if (hits[c] >= 2) accept(c);
+  });
+  Quagga.init({
+    inputStream: { type: 'LiveStream', target: $('reader'),
+      constraints: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
+      area: { top: '25%', bottom: '25%', left: '5%', right: '5%' } },
+    decoder: { readers: READERS }, locate: true, numOfWorkers: 0, frequency: 10
+  }, err => {
+    if (err) { stopCam(); return say('Camera unavailable: ' + err, true); }
+    Quagga.start();
+  });
 };
 
 $('photoBtn').onclick = () => $('photo').click();
 $('photo').onchange = async e => {
   const f = e.target.files[0]; if (!f) return;
   say('Reading photo...');
-  try {
-    const F = Html5QrcodeSupportedFormats;
-    const h = new Html5Qrcode('reader', { formatsToSupport: [F.UPC_A, F.EAN_13, F.UPC_E, F.EAN_8] });
-    const text = await h.scanFile(f, false);
-    $('code').value = text; lookup(text);
-  } catch (err) { say('No barcode found in that photo. Retake it closer, with the barcode flat and well lit.', true); }
-  e.target.value = '';
+  const url = URL.createObjectURL(f);
+  let found = null;
+  for (const t of [{ s: 1600, p: 'large' }, { s: 2400, p: 'large' }, { s: 1200, p: 'medium' }]) {
+    found = await new Promise(res => Quagga.decodeSingle({
+      src: url, numOfWorkers: 0, inputStream: { size: t.s },
+      locator: { patchSize: t.p, halfSample: false }, decoder: { readers: READERS }, locate: true
+    }, r => res(r && r.codeResult ? r.codeResult.code : null)));
+    if (found) break;
+  }
+  URL.revokeObjectURL(url); e.target.value = '';
+  if (found) accept(found);
+  else say('No barcode found in that photo. Retake it closer, with the barcode flat and well lit.', true);
 };
 
 async function loadList() {
