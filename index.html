@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<title>Longbox</title>
+<style>
+:root{--bg:#eef1f4;--card:#fff;--ink:#14213d;--mute:#5d6b82;--line:#d3dae4;--accent:#2b4eff;--onaccent:#fff;--hit:#ffd23f;--bad:#c0392b}
+@media (prefers-color-scheme:dark){:root{--bg:#0f1624;--card:#18223a;--ink:#eef1f7;--mute:#9aa8c2;--line:#2c3a58;--accent:#7f95ff;--onaccent:#0f1624;--hit:#ffd23f;--bad:#ff8a7a}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,-apple-system,sans-serif;padding:env(safe-area-inset-top) 0 env(safe-area-inset-bottom)}
+main{max-width:640px;margin:0 auto;padding:16px}
+h1{font:900 2rem/1 "Arial Black",Impact,system-ui,sans-serif;letter-spacing:-.02em;margin:8px 0 2px;display:inline;background:linear-gradient(transparent 62%,var(--hit) 62%)}
+h2{font-size:1.05rem;margin:28px 0 8px}
+p.sub{color:var(--mute);margin:6px 0 16px}
+section,details{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:14px;margin-bottom:14px}
+summary{cursor:pointer;font-weight:600}
+label{display:block;font-size:.85rem;color:var(--mute);margin:10px 0 3px}
+input{width:100%;font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px}
+input:focus,button:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:1px}
+.row{display:flex;gap:8px}.row>*{flex:1}
+button{font:inherit;font-weight:600;border:0;border-radius:8px;padding:10px 14px;background:var(--accent);color:var(--onaccent);cursor:pointer}
+button.alt{background:transparent;color:var(--ink);border:1px solid var(--line)}
+#reader{margin-top:10px;border-radius:8px;overflow:hidden}
+.msg{margin:10px 0 0;min-height:1.2em;color:var(--mute)}.msg.err{color:var(--bad)}
+.hit{display:flex;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
+.hit:first-child{border-top:0}
+.hit img,.ph{width:56px;height:84px;object-fit:cover;border-radius:4px;background:var(--line);flex:none}
+.hit b{display:block}.hit small{color:var(--mute)}
+.hit .grow{flex:1;min-width:0}
+ul{list-style:none;padding:0;margin:0}
+li.c{padding:9px 0;border-top:1px solid var(--line)}li.c:first-child{border-top:0}
+</style>
+</head>
+<body>
+<main>
+<h1>Longbox</h1>
+<p class="sub">Scan a comic, check the match, save it to your sheet.</p>
+
+<details id="settings">
+<summary>Connection</summary>
+<label for="url">Apps Script web app URL</label><input id="url" inputmode="url" autocomplete="off">
+<label for="token">Token</label><input id="token" type="password" autocomplete="off">
+<p class="msg">Stored only in this browser.</p>
+<button id="saveSet">Save connection</button>
+</details>
+
+<section>
+<label for="code">Barcode</label>
+<div class="row"><input id="code" inputmode="numeric" placeholder="Scan with USB scanner or type"><button id="go" style="flex:0 0 auto">Look up</button></div>
+<div class="row" style="margin-top:8px"><button class="alt" id="cam">Scan with camera</button><button class="alt" id="manual">Enter by hand</button></div>
+<div id="reader"></div>
+<div id="msg" class="msg" role="status"></div>
+<div id="issueFilterBox" hidden><label for="issueFilter">Issue number (the add-on code is not read, so narrow it here)</label><input id="issueFilter" inputmode="numeric"></div>
+<div id="hits"></div>
+</section>
+
+<section id="manualBox" hidden>
+<b>Add by hand</b>
+<label for="mSeries">Series or title</label><input id="mSeries">
+<div class="row"><div><label for="mIssue">Issue</label><input id="mIssue"></div><div><label for="mPub">Publisher</label><input id="mPub"></div></div>
+<label for="mVar">Variant or printing</label><input id="mVar">
+<div style="margin-top:12px"><button id="mSave">Save comic</button></div>
+</section>
+
+<h2>Your collection <span id="count" style="color:var(--mute);font-weight:400"></span></h2>
+<input id="filter" placeholder="Filter by series or publisher">
+<ul id="list" style="margin-top:8px"></ul>
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/html5-qrcode@2.3.8/html5-qrcode.min.js"></script>
+<script>
+const $ = id => document.getElementById(id);
+const store = { get: k => { try { return localStorage.getItem(k) || '' } catch (e) { return '' } },
+                set: (k, v) => { try { localStorage.setItem(k, v) } catch (e) {} } };
+let results = [], scanner = null, collection = [];
+
+$('url').value = store.get('url'); $('token').value = store.get('token');
+if (!store.get('url')) $('settings').open = true;
+$('saveSet').onclick = () => { store.set('url', $('url').value.trim()); store.set('token', $('token').value.trim()); say('Connection saved.'); loadList(); };
+
+function say(t, err) { $('msg').textContent = t; $('msg').className = 'msg' + (err ? ' err' : ''); }
+
+async function api(action, params = {}) {
+  const u = new URL(store.get('url'));
+  u.search = new URLSearchParams({ action, token: store.get('token'), ...params });
+  const r = await fetch(u);
+  const j = await r.json();
+  if (j.error) throw new Error(j.error);
+  return j;
+}
+
+async function lookup(code) {
+  if (!store.get('url')) { $('settings').open = true; return say('Add your connection first.', true); }
+  say('Looking up ' + code + '...'); $('hits').textContent = ''; $('issueFilterBox').hidden = true;
+  try {
+    const j = await api('lookup', { code });
+    results = j.results; $('issueFilter').value = '';
+    if (!results.length) { say('No match for ' + j.code + '. Enter it by hand.', true); openManual(j.code); return; }
+    say(results.length + ' possible match' + (results.length > 1 ? 'es' : '') + '.');
+    $('issueFilterBox').hidden = results.length < 2;
+    renderHits();
+  } catch (e) { say(e.message, true); }
+}
+
+function renderHits() {
+  const f = $('issueFilter').value.trim();
+  const box = $('hits'); box.textContent = '';
+  results.filter(r => !f || String(r.issue) === f).forEach(r => {
+    const d = document.createElement('div'); d.className = 'hit';
+    let img;
+    if (r.cover_url) { img = document.createElement('img'); img.src = r.cover_url; img.alt = ''; img.loading = 'lazy'; }
+    else { img = document.createElement('div'); img.className = 'ph'; }
+    const g = document.createElement('div'); g.className = 'grow';
+    const b = document.createElement('b'); b.textContent = r.title || (r.series + (r.issue ? ' #' + r.issue : ''));
+    const s = document.createElement('small'); s.textContent = [r.publisher, r.cover_date].filter(Boolean).join(', ');
+    const btn = document.createElement('button'); btn.textContent = 'Add to collection'; btn.style.marginTop = '6px';
+    btn.onclick = () => save(r);
+    g.append(b, s, document.createElement('br'), btn);
+    d.append(img, g); box.append(d);
+  });
+}
+$('issueFilter').oninput = renderHits;
+
+async function save(row, force) {
+  try {
+    const j = await api('add', { row: JSON.stringify(row), force: force ? '1' : '' });
+    if (j.duplicate) {
+      if (confirm('You already have this one. Add another copy?')) return save(row, true);
+      return;
+    }
+    say('Saved.'); $('hits').textContent = ''; $('code').value = ''; $('issueFilterBox').hidden = true;
+    loadList();
+  } catch (e) { say(e.message, true); }
+}
+
+function openManual(code) { $('manualBox').hidden = false; $('manualBox').dataset.code = code || ''; $('mSeries').focus(); }
+$('manual').onclick = () => openManual($('code').value.replace(/\D/g, ''));
+$('mSave').onclick = () => {
+  const row = { barcode: $('manualBox').dataset.code, series: $('mSeries').value.trim(), issue: $('mIssue').value.trim(),
+                publisher: $('mPub').value.trim(), variant: $('mVar').value.trim(), source: 'manual' };
+  if (!row.series) return say('Add a series or title.', true);
+  save(row).then(() => { $('manualBox').hidden = true; ['mSeries', 'mIssue', 'mPub', 'mVar'].forEach(i => $(i).value = ''); });
+};
+
+$('go').onclick = () => $('code').value.trim() && lookup($('code').value.trim());
+$('code').onkeydown = e => { if (e.key === 'Enter') $('go').click(); };
+
+$('cam').onclick = async () => {
+  if (scanner) { await scanner.stop().catch(() => {}); scanner = null; $('reader').textContent = ''; $('cam').textContent = 'Scan with camera'; return; }
+  const F = Html5QrcodeSupportedFormats;
+  scanner = new Html5Qrcode('reader', { formatsToSupport: [F.UPC_A, F.EAN_13, F.UPC_E, F.EAN_8] });
+  $('cam').textContent = 'Stop camera';
+  try {
+    await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 280, height: 120 } }, async text => {
+      await scanner.stop().catch(() => {}); scanner = null; $('reader').textContent = ''; $('cam').textContent = 'Scan with camera';
+      $('code').value = text; lookup(text);
+    });
+  } catch (e) { scanner = null; $('cam').textContent = 'Scan with camera'; say('Camera unavailable: ' + e, true); }
+};
+
+async function loadList() {
+  if (!store.get('url')) return;
+  try { collection = (await api('list')).rows.reverse(); renderList(); } catch (e) { say(e.message, true); }
+}
+function renderList() {
+  const f = $('filter').value.toLowerCase(), ul = $('list'); ul.textContent = '';
+  const rows = collection.filter(r => !f || (r.series + ' ' + r.publisher).toLowerCase().includes(f));
+  $('count').textContent = '(' + collection.length + ')';
+  rows.slice(0, 200).forEach(r => {
+    const li = document.createElement('li'); li.className = 'c';
+    const b = document.createElement('b'); b.textContent = r.series + (r.issue ? ' #' + r.issue : '') + (r.variant ? ' (' + r.variant + ')' : '');
+    const s = document.createElement('small'); s.style.color = 'var(--mute)'; s.textContent = ' ' + [r.publisher, r.cover_date].filter(Boolean).join(', ');
+    li.append(b, s); ul.append(li);
+  });
+  if (!rows.length) { const li = document.createElement('li'); li.className = 'c'; li.textContent = 'Nothing here yet. Scan your first comic.'; ul.append(li); }
+}
+$('filter').oninput = renderList;
+loadList();
+</script>
+</body>
+</html>
