@@ -50,6 +50,8 @@ li.c{padding:9px 0;border-top:1px solid var(--line)}li.c:first-child{border-top:
 <label for="code">Barcode</label>
 <div class="row"><input id="code" inputmode="numeric" placeholder="Scan with USB scanner or type"><button id="go" style="flex:0 0 auto">Look up</button></div>
 <div class="row" style="margin-top:8px"><button class="alt" id="cam">Scan with camera</button><button class="alt" id="manual">Enter by hand</button></div>
+<div class="row" style="margin-top:8px"><button class="alt" id="photoBtn">Scan from a photo</button></div>
+<input id="photo" type="file" accept="image/*" capture="environment" hidden>
 <div id="reader"></div>
 <div id="msg" class="msg" role="status"></div>
 <div id="issueFilterBox" hidden><label for="issueFilter">Issue number (the add-on code is not read, so narrow it here)</label><input id="issueFilter" inputmode="numeric"></div>
@@ -153,11 +155,28 @@ $('cam').onclick = async () => {
   scanner = new Html5Qrcode('reader', { formatsToSupport: [F.UPC_A, F.EAN_13, F.UPC_E, F.EAN_8] });
   $('cam').textContent = 'Stop camera';
   try {
-    await scanner.start({ facingMode: 'environment' }, { fps: 10, qrbox: { width: 280, height: 120 } }, async text => {
+    await scanner.start({ facingMode: 'environment' }, {
+      fps: 15,
+      qrbox: (w, h) => ({ width: Math.floor(w * 0.9), height: Math.floor(Math.min(h * 0.5, w * 0.5)) }),
+      videoConstraints: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } }
+    }, async text => {
       await scanner.stop().catch(() => {}); scanner = null; $('reader').textContent = ''; $('cam').textContent = 'Scan with camera';
       $('code').value = text; lookup(text);
     });
   } catch (e) { scanner = null; $('cam').textContent = 'Scan with camera'; say('Camera unavailable: ' + e, true); }
+};
+
+$('photoBtn').onclick = () => $('photo').click();
+$('photo').onchange = async e => {
+  const f = e.target.files[0]; if (!f) return;
+  say('Reading photo...');
+  try {
+    const F = Html5QrcodeSupportedFormats;
+    const h = new Html5Qrcode('reader', { formatsToSupport: [F.UPC_A, F.EAN_13, F.UPC_E, F.EAN_8] });
+    const text = await h.scanFile(f, false);
+    $('code').value = text; lookup(text);
+  } catch (err) { say('No barcode found in that photo. Retake it closer, with the barcode flat and well lit.', true); }
+  e.target.value = '';
 };
 
 async function loadList() {
