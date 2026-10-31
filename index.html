@@ -47,8 +47,8 @@ li.c{padding:9px 0;border-top:1px solid var(--line)}li.c:first-child{border-top:
 </details>
 
 <section>
-<label for="code">Barcode</label>
-<div class="row"><input id="code" inputmode="numeric" placeholder="Scan with USB scanner or type"><button id="go" style="flex:0 0 auto">Look up</button></div>
+<label for="code">Barcode, or title and author</label>
+<div class="row"><input id="code" placeholder="Scan, or type e.g. Batman 89 by Sam Hamm"><button id="go" style="flex:0 0 auto">Search</button></div>
 <div class="row" style="margin-top:8px"><button class="alt" id="cam">Scan with camera</button><button class="alt" id="manual">Enter by hand</button></div>
 <div class="row" style="margin-top:8px"><button class="alt" id="photoBtn">Scan from a photo</button></div>
 <input id="photo" type="file" accept="image/*" capture="environment" hidden>
@@ -137,7 +137,7 @@ async function save(row, force) {
   } catch (e) { say(e.message, true); }
 }
 
-function openManual(code) { $('manualBox').hidden = false; $('manualBox').dataset.code = code || ''; $('mSeries').focus(); }
+function openManual(code, prefill) { $('manualBox').hidden = false; $('manualBox').dataset.code = code || ''; if (prefill) $('mSeries').value = prefill; $('mSeries').focus(); }
 $('manual').onclick = () => openManual($('code').value.replace(/\D/g, ''));
 $('mSave').onclick = () => {
   const row = { barcode: $('manualBox').dataset.code, series: $('mSeries').value.trim(), issue: $('mIssue').value.trim(),
@@ -146,7 +146,23 @@ $('mSave').onclick = () => {
   save(row).then(() => { $('manualBox').hidden = true; ['mSeries', 'mIssue', 'mPub', 'mVar'].forEach(i => $(i).value = ''); });
 };
 
-$('go').onclick = () => $('code').value.trim() && lookup($('code').value.trim());
+async function search(q) {
+  if (!store.get('url')) { $('settings').open = true; return say('Add your connection first.', true); }
+  say('Searching for "' + q + '"...'); $('hits').textContent = ''; $('issueFilterBox').hidden = true;
+  try {
+    const j = await api('search', { q });
+    results = j.results; $('issueFilter').value = '';
+    if (!results.length) { say('No match for "' + q + '". Enter it by hand.', true); openManual('', q); return; }
+    say(results.length + ' possible match' + (results.length > 1 ? 'es' : '') + '.');
+    $('issueFilterBox').hidden = results.length < 2;
+    renderHits();
+  } catch (e) { say(e.message, true); }
+}
+$('go').onclick = () => {
+  const v = $('code').value.trim(); if (!v) return;
+  const digits = v.replace(/[\s-]/g, '');
+  /^\d{8,}$/.test(digits) ? lookup(digits) : search(v);
+};
 $('code').onkeydown = e => { if (e.key === 'Enter') $('go').click(); };
 
 let live = false;
