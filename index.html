@@ -76,7 +76,7 @@ li.c{padding:9px 0;border-top:1px solid var(--line)}li.c:first-child{border-top:
 const $ = id => document.getElementById(id);
 const store = { get: k => { try { return localStorage.getItem(k) || '' } catch (e) { return '' } },
                 set: (k, v) => { try { localStorage.setItem(k, v) } catch (e) {} } };
-let results = [], collection = [];
+let results = [], owned = [], collection = [], pendingCode = '';
 
 $('url').value = store.get('url'); $('token').value = store.get('token');
 if (!store.get('url')) $('settings').open = true;
@@ -93,32 +93,46 @@ async function api(action, params = {}) {
   return j;
 }
 
+function showResults(j, label) {
+  results = j.results || []; owned = j.owned || []; $('issueFilter').value = '';
+  const n = results.length + owned.length;
+  const own = owned.length ? ' You already own ' + owned.length + ' of this barcode.' : '';
+  const keep = pendingCode ? ' The barcode ' + pendingCode + ' will be saved with the one you pick.' : '';
+  say(n + ' possible match' + (n > 1 ? 'es' : '') + '.' + own + keep);
+  $('issueFilterBox').hidden = n < 2;
+  renderHits();
+}
+
 async function lookup(code) {
   if (!store.get('url')) { $('settings').open = true; return say('Add your connection first.', true); }
-  say('Looking up ' + code + '...'); $('hits').textContent = ''; $('issueFilterBox').hidden = true;
+  say('Looking up ' + code + '...'); $('hits').textContent = ''; $('issueFilterBox').hidden = true; pendingCode = '';
   try {
     const j = await api('lookup', { code });
-    results = j.results; $('issueFilter').value = '';
-    if (!results.length) { say('No match for ' + j.code + '. Enter it by hand.', true); openManual(j.code); return; }
-    say(results.length + ' possible match' + (results.length > 1 ? 'es' : '') + '.');
-    $('issueFilterBox').hidden = results.length < 2;
-    renderHits();
+    if (!(j.results || []).length && !(j.owned || []).length) {
+      pendingCode = j.code; results = []; owned = [];
+      say('No match for ' + j.code + '. Search by title above, or enter it by hand. The barcode will be saved.', true);
+      openManual(j.code); return;
+    }
+    showResults(j);
   } catch (e) { say(e.message, true); }
 }
 
 function renderHits() {
   const f = $('issueFilter').value.trim();
   const box = $('hits'); box.textContent = '';
-  results.filter(r => !f || String(r.issue) === f).forEach(r => {
+  const items = owned.map(r => ({ r, own: true })).concat(results.map(r => ({ r, own: false })));
+  items.filter(x => !f || String(x.r.issue) === f).forEach(({ r, own }) => {
     const d = document.createElement('div'); d.className = 'hit';
     let img;
     if (r.cover_url) { img = document.createElement('img'); img.src = r.cover_url; img.alt = ''; img.loading = 'lazy'; }
     else { img = document.createElement('div'); img.className = 'ph'; }
     const g = document.createElement('div'); g.className = 'grow';
-    const b = document.createElement('b'); b.textContent = r.title || (r.series + (r.issue ? ' #' + r.issue : ''));
-    const s = document.createElement('small'); s.textContent = [r.publisher, r.cover_date].filter(Boolean).join(', ');
-    const btn = document.createElement('button'); btn.textContent = 'Add to collection'; btn.style.marginTop = '6px';
-    btn.onclick = () => save(r);
+    const b = document.createElement('b');
+    b.textContent = r.title || (r.series + (r.issue ? ' #' + r.issue : '') + (r.variant ? ' (' + r.variant + ')' : ''));
+    const s = document.createElement('small');
+    s.textContent = (own ? 'In your collection. ' : '') + [r.publisher, r.cover_date].filter(Boolean).join(', ');
+    const btn = document.createElement('button'); btn.textContent = own ? 'Add another copy' : 'Add to collection'; btn.style.marginTop = '6px';
+    btn.onclick = () => save(r, own);
     g.append(b, s, document.createElement('br'), btn);
     d.append(img, g); box.append(d);
   });
@@ -126,13 +140,14 @@ function renderHits() {
 $('issueFilter').oninput = renderHits;
 
 async function save(row, force) {
+  if (!row.barcode && pendingCode) row.barcode = pendingCode;
   try {
     const j = await api('add', { row: JSON.stringify(row), force: force ? '1' : '' });
     if (j.duplicate) {
       if (confirm('You already have this one. Add another copy?')) return save(row, true);
       return;
     }
-    say('Saved.'); $('hits').textContent = ''; $('code').value = ''; $('issueFilterBox').hidden = true;
+    say('Saved.'); $('hits').textContent = ''; $('code').value = ''; $('issueFilterBox').hidden = true; pendingCode = '';
     loadList();
   } catch (e) { say(e.message, true); }
 }
@@ -151,11 +166,12 @@ async function search(q) {
   say('Searching for "' + q + '"...'); $('hits').textContent = ''; $('issueFilterBox').hidden = true;
   try {
     const j = await api('search', { q });
-    results = j.results; $('issueFilter').value = '';
-    if (!results.length) { say('No match for "' + q + '". Enter it by hand.', true); openManual('', q); return; }
-    say(results.length + ' possible match' + (results.length > 1 ? 'es' : '') + '.');
-    $('issueFilterBox').hidden = results.length < 2;
-    renderHits();
+    if (!(j.results || []).length) {
+      results = []; owned = [];
+      say('No match for "' + q + '". Enter it by hand.' + (pendingCode ? ' The barcode will be saved.' : ''), true);
+      openManual(pendingCode, q); return;
+    }
+    showResults({ results: j.results, owned: [] });
   } catch (e) { say(e.message, true); }
 }
 $('go').onclick = () => {
