@@ -21,6 +21,7 @@ input{width:100%;font:inherit;color:inherit;background:var(--bg);border:1px soli
 input:focus,button:focus-visible,summary:focus-visible{outline:3px solid var(--accent);outline-offset:1px}
 .row{display:flex;gap:8px}.row>*{flex:1}
 button{font:inherit;font-weight:600;border:0;border-radius:8px;padding:10px 14px;background:var(--accent);color:var(--onaccent);cursor:pointer}
+button.danger{background:transparent;color:var(--bad);border:1px solid var(--bad)}
 button.alt{background:transparent;color:var(--ink);border:1px solid var(--line)}
 #reader{margin-top:10px;border-radius:8px;overflow:hidden;position:relative}#reader video{width:100%;display:block}#reader canvas.drawingBuffer{position:absolute;left:0;top:0;width:100%;height:100%}
 .msg{margin:10px 0 0;min-height:1.2em;color:var(--mute)}.msg.err{color:var(--bad)}
@@ -59,11 +60,14 @@ li.c{padding:9px 0;border-top:1px solid var(--line)}li.c:first-child{border-top:
 </section>
 
 <section id="manualBox" hidden>
-<b>Add by hand</b>
+<b id="formTitle">Add by hand</b>
 <label for="mSeries">Series or title</label><input id="mSeries">
 <div class="row"><div><label for="mIssue">Issue</label><input id="mIssue"></div><div><label for="mPub">Publisher</label><input id="mPub"></div></div>
 <label for="mVar">Variant or printing</label><input id="mVar">
-<div style="margin-top:12px"><button id="mSave">Save comic</button></div>
+<div class="row"><div><label for="mDate">Cover date</label><input id="mDate"></div><div><label for="mBarcode">Barcode</label><input id="mBarcode" inputmode="numeric"></div></div>
+<div class="row"><div><label for="mCond">Condition</label><input id="mCond"></div><div><label for="mPrice">Purchase price</label><input id="mPrice"></div></div>
+<label for="mNotes">Notes</label><input id="mNotes">
+<div class="row" style="margin-top:14px"><button id="mSave">Save</button><button class="alt" id="mCancel">Cancel</button><button class="danger" id="mDelete" hidden>Delete</button></div>
 </section>
 
 <h2>Your collection <span id="count" style="color:var(--mute);font-weight:400"></span></h2>
@@ -152,13 +156,42 @@ async function save(row, force) {
   } catch (e) { say(e.message, true); }
 }
 
-function openManual(code, prefill) { $('manualBox').hidden = false; $('manualBox').dataset.code = code || ''; if (prefill) $('mSeries').value = prefill; $('mSeries').focus(); }
+let editing = null;
+const FIELDS = { series: 'mSeries', issue: 'mIssue', publisher: 'mPub', variant: 'mVar', cover_date: 'mDate',
+  barcode: 'mBarcode', condition: 'mCond', purchase_price: 'mPrice', notes: 'mNotes' };
+function openForm(title, data) {
+  $('formTitle').textContent = title;
+  Object.keys(FIELDS).forEach(k => $(FIELDS[k]).value = (data && data[k]) || '');
+  $('mDelete').hidden = !editing;
+  $('manualBox').hidden = false;
+  $('manualBox').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+function openManual(code, prefill) { editing = null; openForm('Add by hand', { barcode: code || '', series: prefill || '' }); $('mSeries').focus(); }
+function openEdit(r) { editing = r; openForm('Edit comic', r); }
+function closeForm() { editing = null; $('manualBox').hidden = true; }
+const rowCheck = r => [r.series, r.issue, r.barcode].join('|');
 $('manual').onclick = () => openManual($('code').value.replace(/\D/g, ''));
-$('mSave').onclick = () => {
-  const row = { barcode: $('manualBox').dataset.code, series: $('mSeries').value.trim(), issue: $('mIssue').value.trim(),
-                publisher: $('mPub').value.trim(), variant: $('mVar').value.trim(), source: 'manual' };
+$('mCancel').onclick = closeForm;
+$('mSave').onclick = async () => {
+  const row = {};
+  Object.keys(FIELDS).forEach(k => row[k] = $(FIELDS[k]).value.trim());
   if (!row.series) return say('Add a series or title.', true);
-  save(row).then(() => { $('manualBox').hidden = true; ['mSeries', 'mIssue', 'mPub', 'mVar'].forEach(i => $(i).value = ''); });
+  if (editing) {
+    try {
+      await api('update', { row: editing._row, check: rowCheck(editing), data: JSON.stringify(row) });
+      say('Changes saved.'); closeForm(); loadList();
+    } catch (e) { say(e.message, true); }
+    return;
+  }
+  row.source = 'manual';
+  save(row).then(() => closeForm());
+};
+$('mDelete').onclick = async () => {
+  if (!editing || !confirm('Delete "' + editing.series + (editing.issue ? ' #' + editing.issue : '') + '" from your collection?')) return;
+  try {
+    await api('delete', { row: editing._row, check: rowCheck(editing) });
+    say('Deleted.'); closeForm(); loadList();
+  } catch (e) { say(e.message, true); loadList(); }
 };
 
 async function search(q) {
@@ -239,7 +272,10 @@ function renderList() {
     const li = document.createElement('li'); li.className = 'c';
     const b = document.createElement('b'); b.textContent = r.series + (r.issue ? ' #' + r.issue : '') + (r.variant ? ' (' + r.variant + ')' : '');
     const s = document.createElement('small'); s.style.color = 'var(--mute)'; s.textContent = ' ' + [r.publisher, r.cover_date].filter(Boolean).join(', ');
-    li.append(b, s); ul.append(li);
+    const edit = document.createElement('button'); edit.className = 'alt'; edit.textContent = 'Edit';
+    edit.style.cssText = 'float:right;padding:4px 10px;font-size:.85rem';
+    edit.onclick = () => openEdit(r);
+    li.append(edit, b, s); ul.append(li);
   });
   if (!rows.length) { const li = document.createElement('li'); li.className = 'c'; li.textContent = 'Nothing here yet. Scan your first comic.'; ul.append(li); }
 }
