@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Gutter icon maker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Yellowtail&display=swap" rel="stylesheet">
+<style>
+body{margin:0;background:#0d0620;color:#f6ecff;font:16px/1.5 system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;text-align:center;padding:24px}
+canvas{border-radius:40px;box-shadow:0 0 0 1px #5a1f8f,0 0 30px rgba(255,46,151,.25);margin:16px 0}
+button{font:inherit;font-weight:600;border:0;border-radius:8px;padding:10px 18px;background:#ff2e97;color:#1a0630;cursor:pointer}
+p{max-width:420px;color:#b8a2dc}
+#note{color:#ff7a96;min-height:1.5em}
+</style>
+</head>
+<body>
+<main>
+<h1 style="font:400 2rem Yellowtail,cursive;margin:0;color:#8ff4ff">Icon maker</h1>
+<canvas id="c" width="180" height="180"></canvas>
+<div><button id="dl">Download apple-touch-icon.png</button></div>
+<p id="note"></p>
+<p>Save the file next to <b>index.html</b> in your GitHub repository.</p>
+</main>
+<script>
+const c = document.getElementById('c'), ctx = c.getContext('2d'), S = 180;
+
+async function draw() {
+  try { await document.fonts.load('150px Yellowtail', 'G'); } catch (e) {}
+  if (!document.fonts.check('150px Yellowtail')) document.getElementById('note').textContent = 'The font did not load. Check your internet connection and reload.';
+  ctx.clearRect(0, 0, S, S);
+  const bg = ctx.createLinearGradient(0, 0, 0, S);
+  bg.addColorStop(0, '#2b0b52'); bg.addColorStop(1, '#0d0620');
+  ctx.fillStyle = bg; ctx.fillRect(0, 0, S, S);
+
+  ctx.font = '150px Yellowtail, cursive';
+  ctx.textAlign = 'left'; ctx.lineJoin = 'round';
+  const m = ctx.measureText('G');
+  const x = S / 2 + (m.actualBoundingBoxLeft - m.actualBoundingBoxRight) / 2, y = (S + m.actualBoundingBoxAscent - m.actualBoundingBoxDescent) / 2;
+
+  // glow
+  ctx.fillStyle = '#ff2e97';
+  [[40, .55], [18, .85]].forEach(([blur, a]) => {
+    ctx.shadowColor = 'rgba(255,46,151,' + a + ')'; ctx.shadowBlur = blur;
+    ctx.fillText('G', x, y);
+  });
+  ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0;
+
+  // edge: crimson outline, then magenta band, then the pale core on top
+  ctx.strokeStyle = '#7a0c44'; ctx.lineWidth = 9.6; ctx.strokeText('G', x, y);
+  ctx.strokeStyle = '#e01880'; ctx.lineWidth = 4.8; ctx.strokeText('G', x, y);
+  ctx.fillStyle = '#ffe0f0'; ctx.fillText('G', x, y);
+}
+draw();
+
+document.getElementById('dl').onclick = () => c.toBlob(b => {
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(b); a.download = 'apple-touch-icon.png'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
+}, 'image/png');
+</script>
+</body>
+</html>
