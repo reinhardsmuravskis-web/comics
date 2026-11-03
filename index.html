@@ -54,19 +54,16 @@ details.sec #count,details.sec #wcount{font:400 1rem system-ui,sans-serif;color:
 .picker img{width:56px;height:84px;object-fit:cover;border-radius:4px;display:block}
 .btns{display:flex;gap:8px;margin-top:8px}
 .btns button{flex:1 1 0;min-width:0;padding:10px 8px}
+.tool{padding:12px 0;border-top:1px solid var(--line)}
+.tool:first-of-type{border-top:0}
+.tool>b{display:block;margin-bottom:4px}
+.tool .msg{margin:4px 0 8px;min-height:0}
+#ver{text-align:center;color:var(--mute);font-size:.75rem;margin:24px 0 8px}
 </style>
 </head>
 <body>
 <main>
 <header class="hero"><h1>The Gutter</h1><div class="bar"></div><p class="sub">Scan a comic, check the match, save it to your sheet.</p></header>
-
-<details id="settings">
-<summary>Connection</summary>
-<label for="url">Apps Script web app URL</label><input id="url" inputmode="url" autocomplete="off">
-<label for="token">Token</label><input id="token" type="password" autocomplete="off">
-<p class="msg">Stored only in this browser.</p>
-<button id="saveSet">Save connection</button>
-</details>
 
 <section>
 <label for="code">Barcode, or title and author</label>
@@ -95,12 +92,29 @@ details.sec #count,details.sec #wcount{font:400 1rem system-ui,sans-serif;color:
 
 <details class="sec" id="colBox"><summary>Your collection <span id="count"></span></summary>
 <input id="filter" placeholder="Filter by series or publisher" style="margin-top:10px">
-<div style="margin-top:8px"><button class="alt" id="enrichCol" style="padding:6px 12px;font-size:.85rem">Fill in missing publishers and authors</button> <small id="enrichColMsg" style="color:var(--mute)"></small></div>
 <ul id="list" style="margin-top:8px"></ul></details>
 <details class="sec" id="wishBox"><summary>Wishlist <span id="wcount"></span></summary>
 <input id="wfilter" placeholder="Filter the wishlist" style="margin-top:10px">
-<div style="margin-top:8px"><button class="alt" id="enrichWish" style="padding:6px 12px;font-size:.85rem">Fill in missing publishers and authors</button> <small id="enrichWishMsg" style="color:var(--mute)"></small></div>
 <ul id="wlist" style="margin-top:8px"></ul></details>
+<details class="sec" id="toolsBox"><summary>Tools</summary>
+<div class="tool"><b>Connection</b>
+<label for="url">Apps Script web app URL</label><input id="url" inputmode="url" autocomplete="off">
+<label for="token">Token</label><input id="token" type="password" autocomplete="off">
+<p class="msg">Stored only in this browser.</p>
+<button id="saveSet">Save connection</button></div>
+<div class="tool"><b>Fill in missing details</b>
+<p class="msg">Looks up publishers and authors for entries that lack them. Keep this page open until it says Done.</p>
+<div class="btns"><button class="alt" id="enrichCol">Collection</button><button class="alt" id="enrichWish">Wishlist</button></div>
+<p class="msg" id="enrichMsg"></p></div>
+<div class="tool"><b>Export to a file</b>
+<p class="msg">Downloads a CSV file that opens in Excel, Numbers or Google Sheets.</p>
+<div class="btns"><button class="alt" id="expCol">Collection</button><button class="alt" id="expWish">Wishlist</button></div></div>
+<div class="tool"><b>Back up to Google Drive</b>
+<p class="msg">Saves a dated copy of the whole Google Sheet in your Drive. Delete old copies there when you no longer need them.</p>
+<button class="alt" id="backup">Make a backup copy</button>
+<p class="msg" id="backupMsg"></p></div>
+</details>
+<footer id="ver"></footer>
 </main>
 
 <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.8.4/dist/quagga.min.js"></script>
@@ -111,7 +125,7 @@ const store = { get: k => { try { return localStorage.getItem(k) || '' } catch (
 let results = [], owned = [], collection = [], wishlist = [], pendingCode = '';
 
 $('url').value = store.get('url'); $('token').value = store.get('token');
-if (!store.get('url')) $('settings').open = true;
+if (!store.get('url')) $('toolsBox').open = true;
 $('saveSet').onclick = () => { store.set('url', $('url').value.trim()); store.set('token', $('token').value.trim()); say('Connection saved.'); loadList(); loadWishlist(); };
 
 function say(t, err) { $('msg').textContent = t; $('msg').className = 'msg' + (err ? ' err' : ''); }
@@ -136,7 +150,7 @@ function showResults(j, label) {
 }
 
 async function lookup(code) {
-  if (!store.get('url')) { $('settings').open = true; return say('Add your connection first.', true); }
+  if (!store.get('url')) { $('toolsBox').open = true; return say('Add your connection first.', true); }
   say('Looking up ' + code + '...'); $('hits').textContent = ''; $('issueFilterBox').hidden = true; pendingCode = '';
   try {
     const j = await api('lookup', { code });
@@ -259,7 +273,7 @@ $('mFind').onclick = async () => {
 };
 
 async function search(q) {
-  if (!store.get('url')) { $('settings').open = true; return say('Add your connection first.', true); }
+  if (!store.get('url')) { $('toolsBox').open = true; return say('Add your connection first.', true); }
   say('Searching for "' + q + '"...'); $('hits').textContent = ''; $('issueFilterBox').hidden = true;
   try {
     const j = await api('search', { q });
@@ -387,8 +401,36 @@ async function enrichTab(tab, btn, msg) {
   } catch (e) { msg.textContent = e.message; }
   btn.disabled = false;
 }
-$('enrichCol').onclick = () => enrichTab('collection', $('enrichCol'), $('enrichColMsg'));
-$('enrichWish').onclick = () => enrichTab('wishlist', $('enrichWish'), $('enrichWishMsg'));
+$('enrichCol').onclick = () => enrichTab('collection', $('enrichCol'), $('enrichMsg'));
+$('enrichWish').onclick = () => enrichTab('wishlist', $('enrichWish'), $('enrichMsg'));
+
+// ---- export to CSV ----
+const CSV_COLS = ['barcode', 'series', 'issue', 'variant', 'publisher', 'authors', 'cover_date', 'condition', 'purchase_price', 'notes', 'cover_url', 'source', 'date_added'];
+function exportCsv(rows, name) {
+  if (!rows.length) return say('Nothing to export yet.', true);
+  const q = v => '"' + String(v == null ? '' : v).replace(/"/g, '""') + '"';
+  const text = [CSV_COLS.map(q).join(',')].concat(rows.slice().reverse().map(r => CSV_COLS.map(c => q(r[c])).join(','))).join('\r\n');
+  const blob = new Blob(['\ufeff' + text], { type: 'text/csv;charset=utf-8' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob); a.download = name + '-' + new Date().toISOString().slice(0, 10) + '.csv';
+  document.body.append(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  say('Exported ' + rows.length + ' rows.');
+}
+$('expCol').onclick = () => exportCsv(collection, 'gutter-collection');
+$('expWish').onclick = () => exportCsv(wishlist, 'gutter-wishlist');
+
+// ---- backup to Google Drive ----
+$('backup').onclick = async () => {
+  const btn = $('backup'), msg = $('backupMsg');
+  btn.disabled = true; msg.textContent = 'Making a copy...';
+  try { const j = await api('backup'); msg.textContent = 'Saved in your Google Drive as "' + j.name + '".'; }
+  catch (e) { msg.textContent = e.message; }
+  btn.disabled = false;
+};
+
+const VERSION = '14';
+$('ver').textContent = 'The Gutter \u00b7 version ' + VERSION;
 $('code').oninput = () => {
   if ($('code').value.trim()) return;
   results = []; owned = []; pendingCode = '';
