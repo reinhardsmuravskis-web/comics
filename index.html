@@ -32,7 +32,7 @@ input{width:100%;font:inherit;color:inherit;background:var(--bg);border:1px soli
 input::placeholder{color:#8f78b8}
 input:focus,button:focus-visible,summary:focus-visible{outline:2px solid var(--cyan);outline-offset:1px;box-shadow:0 0 10px rgba(34,230,255,.4)}
 .row{display:flex;gap:8px}.row>*{flex:1}
-button{font:inherit;font-weight:600;border:0;border-radius:8px;padding:10px 14px;background:var(--accent);color:var(--onaccent);cursor:pointer;box-shadow:0 0 12px rgba(255,46,151,.45)}
+button{font:inherit;font-weight:600;border:1px solid transparent;border-radius:8px;padding:10px 14px;background:var(--accent);color:var(--onaccent);cursor:pointer;box-shadow:0 0 12px rgba(255,46,151,.45)}
 button.danger{background:transparent;color:var(--bad);border:1px solid var(--bad)}
 button.alt{background:transparent;color:var(--cyan);border:1px solid var(--cyan);box-shadow:0 0 8px rgba(34,230,255,.25)}
 #reader{margin-top:10px;border-radius:8px;overflow:hidden;position:relative}#reader video{width:100%;display:block}#reader canvas.drawingBuffer{position:absolute;left:0;top:0;width:100%;height:100%}
@@ -52,6 +52,8 @@ details.sec #count,details.sec #wcount{font:400 1rem system-ui,sans-serif;color:
 .picker button{padding:0;background:none;box-shadow:none;border:2px solid transparent;border-radius:6px}
 .picker button.sel{border-color:var(--cyan)}
 .picker img{width:56px;height:84px;object-fit:cover;border-radius:4px;display:block}
+.btns{display:flex;gap:8px;margin-top:8px}
+.btns button{flex:1 1 0;min-width:0;padding:10px 8px}
 </style>
 </head>
 <body>
@@ -158,14 +160,15 @@ function renderHits() {
     b.textContent = r.title || (r.series + (r.issue ? ' #' + r.issue : '') + (r.variant ? ' (' + r.variant + ')' : ''));
     const s = document.createElement('small');
     s.textContent = (own ? 'In your collection. ' : '') + [r.publisher, r.cover_date].filter(Boolean).join(', ');
-    const btn = document.createElement('button'); btn.textContent = own ? 'Add another copy' : 'Add to collection'; btn.style.marginTop = '6px';
+    const btn = document.createElement('button'); btn.textContent = own ? 'Add another copy' : 'Add to collection';
     btn.onclick = () => save(r, own);
-    g.append(b, s, document.createElement('br'), btn);
+    const bar = document.createElement('div'); bar.className = 'btns'; bar.append(btn);
     if (!own) {
-      const wb = document.createElement('button'); wb.className = 'alt'; wb.textContent = 'Add to wishlist'; wb.style.cssText = 'margin:6px 0 0 8px';
+      const wb = document.createElement('button'); wb.className = 'alt'; wb.textContent = 'Add to wishlist';
       wb.onclick = () => { if (owned.length && !confirm('You already own something with this barcode. Add it to the wishlist anyway?')) return; save(r, false, 'wishlist'); };
-      g.append(wb);
+      bar.append(wb);
     }
+    g.append(b, s, bar);
     d.append(img, g); box.append(d);
   });
 }
