@@ -70,7 +70,7 @@ details.sec #count,details.sec #wcount{font:400 1rem system-ui,sans-serif;color:
 
 <section>
 <label for="code">Barcode, or title and author</label>
-<div class="row"><input id="code" placeholder="Scan, or type e.g. Batman 89 by Sam Hamm"><button id="go" style="flex:0 0 auto">Search</button></div>
+<div class="row"><input id="code" type="search" enterkeyhint="search" autocomplete="off" placeholder="Scan, or type e.g. Gotham by Gaslight"><button id="go" style="flex:0 0 auto">Search</button></div>
 <div class="row" style="margin-top:8px"><button class="alt" id="cam">Scan with camera</button><button class="alt" id="manual">Enter by hand</button></div>
 <div class="row" style="margin-top:8px"><button class="alt" id="photoBtn">Scan from a photo</button></div>
 <input id="photo" type="file" accept="image/*" capture="environment" hidden>
@@ -84,6 +84,7 @@ details.sec #count,details.sec #wcount{font:400 1rem system-ui,sans-serif;color:
 <b id="formTitle">Add by hand</b>
 <label for="mSeries">Series or title</label><input id="mSeries">
 <div class="row"><div><label for="mIssue">Issue</label><input id="mIssue"></div><div><label for="mPub">Publisher</label><input id="mPub"></div></div>
+<label for="mAuthors">Authors</label><input id="mAuthors">
 <label for="mVar">Variant or printing</label><input id="mVar">
 <div class="row"><div><label for="mDate">Cover date</label><input id="mDate"></div><div><label for="mBarcode">Barcode</label><input id="mBarcode" inputmode="numeric"></div></div>
 <div class="row"><div><label for="mCond">Condition</label><input id="mCond"></div><div><label for="mPrice">Purchase price</label><input id="mPrice"></div></div>
@@ -94,9 +95,11 @@ details.sec #count,details.sec #wcount{font:400 1rem system-ui,sans-serif;color:
 
 <details class="sec" id="colBox"><summary>Your collection <span id="count"></span></summary>
 <input id="filter" placeholder="Filter by series or publisher" style="margin-top:10px">
+<div style="margin-top:8px"><button class="alt" id="enrichCol" style="padding:6px 12px;font-size:.85rem">Fill in missing publishers and authors</button> <small id="enrichColMsg" style="color:var(--mute)"></small></div>
 <ul id="list" style="margin-top:8px"></ul></details>
 <details class="sec" id="wishBox"><summary>Wishlist <span id="wcount"></span></summary>
 <input id="wfilter" placeholder="Filter the wishlist" style="margin-top:10px">
+<div style="margin-top:8px"><button class="alt" id="enrichWish" style="padding:6px 12px;font-size:.85rem">Fill in missing publishers and authors</button> <small id="enrichWishMsg" style="color:var(--mute)"></small></div>
 <ul id="wlist" style="margin-top:8px"></ul></details>
 </main>
 
@@ -192,7 +195,7 @@ async function save(row, force, tab) {
 
 let editing = null, editTab = 'collection';
 const FIELDS = { series: 'mSeries', issue: 'mIssue', publisher: 'mPub', variant: 'mVar', cover_date: 'mDate',
-  barcode: 'mBarcode', condition: 'mCond', purchase_price: 'mPrice', notes: 'mNotes', cover_url: 'mCover' };
+  barcode: 'mBarcode', condition: 'mCond', purchase_price: 'mPrice', notes: 'mNotes', cover_url: 'mCover', authors: 'mAuthors' };
 function openForm(title, data) {
   $('formTitle').textContent = title;
   Object.keys(FIELDS).forEach(k => $(FIELDS[k]).value = (data && data[k]) || '');
@@ -341,7 +344,7 @@ function renderRows(ul, rows, tab, emptyText) {
     } else { thumb = document.createElement('div'); thumb.className = 'thumb'; }
     const g = document.createElement('div'); g.className = 'grow';
     const b = document.createElement('b'); b.textContent = r.series + (r.issue ? ' #' + r.issue : '') + (r.variant ? ' (' + r.variant + ')' : '');
-    const s = document.createElement('small'); s.style.color = 'var(--mute)'; s.textContent = [r.publisher, r.cover_date].filter(Boolean).join(', ');
+    const s = document.createElement('small'); s.style.color = 'var(--mute)'; s.textContent = [r.publisher, r.cover_date, r.authors].filter(Boolean).join(' · ');
     g.append(b, s);
     const small = 'padding:4px 10px;font-size:.85rem;flex:none';
     const edit = document.createElement('button'); edit.className = 'alt'; edit.textContent = 'Edit'; edit.style.cssText = small;
@@ -370,6 +373,27 @@ function renderWish() {
   $('wcount').textContent = '(' + wishlist.length + ')';
   renderRows($('wlist'), wishlist.filter(r => matches(r, f)), 'wishlist', 'Nothing on your wishlist yet. Search a title and tap Add to wishlist.');
 }
+async function enrichTab(tab, btn, msg) {
+  btn.disabled = true; let start = 2, filled = 0;
+  try {
+    for (let i = 0; i < 80; i++) {
+      const j = await api('enrich', { start, tab });
+      filled += j.filled; start = j.next;
+      msg.textContent = 'Checked ' + Math.min(start - 2, j.last - 1) + ' of ' + (j.last - 1) + ', filled ' + filled + '...';
+      if (j.finished) break;
+    }
+    msg.textContent = 'Done. Updated ' + filled + (filled === 1 ? ' entry.' : ' entries.');
+    reloadAll();
+  } catch (e) { msg.textContent = e.message; }
+  btn.disabled = false;
+}
+$('enrichCol').onclick = () => enrichTab('collection', $('enrichCol'), $('enrichColMsg'));
+$('enrichWish').onclick = () => enrichTab('wishlist', $('enrichWish'), $('enrichWishMsg'));
+$('code').oninput = () => {
+  if ($('code').value.trim()) return;
+  results = []; owned = []; pendingCode = '';
+  $('hits').textContent = ''; $('issueFilterBox').hidden = true; say('');
+};
 $('filter').oninput = renderList;
 $('wfilter').oninput = renderWish;
 loadList(); loadWishlist();
