@@ -224,6 +224,7 @@ async function save(row, force, tab) {
     say(tab === 'wishlist' ? 'Added to your wishlist.' : 'Saved.');
     $('hits').textContent = ''; $('code').value = ''; $('issueFilterBox').hidden = true; pendingCode = '';
     tab === 'wishlist' ? loadWishlist() : loadList();
+    if (cameraMode) { startCam(); setTimeout(() => $('reader').scrollIntoView({ behavior: 'smooth', block: 'center' }), 300); }
   } catch (e) { say(e.message, true); }
 }
 
@@ -306,6 +307,7 @@ async function search(q) {
   } catch (e) { say(e.message, true); }
 }
 $('go').onclick = () => {
+  cameraMode = false;
   const v = $('code').value.trim(); if (!v) return;
   const digits = v.replace(/[\s-]/g, '');
   /^\d{8,}$/.test(digits) ? lookup(digits) : search(v);
@@ -318,16 +320,17 @@ function stopCam() {
   if (live) { try { Quagga.stop(); } catch (e) {} live = false; }
   $('reader').textContent = ''; $('cam').textContent = 'Scan with camera';
 }
-function accept(text) { stopCam(); $('code').value = text; lookup(text); }
+let cameraMode = false; // true while scanning with the live camera: it restarts after each save
+function accept(text, viaCam) { stopCam(); cameraMode = !!viaCam; $('code').value = text; lookup(text); }
 
-$('cam').onclick = () => {
-  if (live) return stopCam();
+function startCam() {
+  if (live) return;
   live = true; $('cam').textContent = 'Stop camera';
   const hits = {};
   Quagga.offDetected();
   Quagga.onDetected(r => {
     const c = r.codeResult.code; hits[c] = (hits[c] || 0) + 1;
-    if (hits[c] >= 2) accept(c);
+    if (hits[c] >= 2) accept(c, true);
   });
   Quagga.init({
     inputStream: { type: 'LiveStream', target: $('reader'),
@@ -338,7 +341,8 @@ $('cam').onclick = () => {
     if (err) { stopCam(); return say('Camera unavailable: ' + err, true); }
     Quagga.start();
   });
-};
+}
+$('cam').onclick = () => { if (live) { cameraMode = false; return stopCam(); } startCam(); };
 
 $('photoBtn').onclick = () => $('photo').click();
 $('photo').onchange = async e => {
@@ -511,7 +515,7 @@ $('disconnect').onclick = () => {
   collection = []; wishlist = []; renderList(); renderWish(); openGate();
 };
 
-const VERSION = '16';
+const VERSION = '17';
 $('ver').textContent = 'The Gutter \u00b7 version ' + VERSION;
 $('code').oninput = () => {
   if ($('code').value.trim()) return;
