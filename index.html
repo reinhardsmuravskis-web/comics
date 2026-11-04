@@ -66,6 +66,8 @@ details.sec #count,details.sec #wcount{font:400 1rem system-ui,sans-serif;color:
 .gate p{color:var(--mute);margin:0 0 6px;text-align:center}
 .gate .msg.err{color:var(--bad)}
 .gate button{width:100%;margin-top:14px}
+select{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:10px}
+.row>select{flex:0 0 auto;max-width:42%}
 </style>
 </head>
 <body>
@@ -98,10 +100,10 @@ details.sec #count,details.sec #wcount{font:400 1rem system-ui,sans-serif;color:
 </section>
 
 <details class="sec" id="colBox"><summary>Your collection <span id="count"></span></summary>
-<input id="filter" placeholder="Filter by series or publisher" style="margin-top:10px">
+<div class="row" style="margin-top:10px"><input id="filter" placeholder="Filter by title, author, publisher, notes"><select id="sort" aria-label="Sort"><option value="added">Newest added</option><option value="title">Title A to Z</option><option value="publisher">Publisher</option><option value="date">Cover date</option></select></div>
 <ul id="list" style="margin-top:8px"></ul></details>
 <details class="sec" id="wishBox"><summary>Wishlist <span id="wcount"></span></summary>
-<input id="wfilter" placeholder="Filter the wishlist" style="margin-top:10px">
+<div class="row" style="margin-top:10px"><input id="wfilter" placeholder="Filter the wishlist"><select id="wsort" aria-label="Sort wishlist"><option value="added">Newest added</option><option value="title">Title A to Z</option><option value="publisher">Publisher</option><option value="date">Cover date</option></select></div>
 <ul id="wlist" style="margin-top:8px"></ul></details>
 <details class="sec" id="toolsBox"><summary>Tools</summary>
 <div class="tool"><b>Connection</b>
@@ -366,7 +368,7 @@ async function loadWishlist() {
 }
 function renderRows(ul, rows, tab, emptyText) {
   ul.textContent = '';
-  rows.slice(0, 200).forEach(r => {
+  rows.slice(0, limits[tab]).forEach(r => {
     const li = document.createElement('li'); li.className = 'c';
     let thumb;
     if (r.cover_url) {
@@ -393,18 +395,43 @@ function renderRows(ul, rows, tab, emptyText) {
     li.append(edit); ul.append(li);
   });
   if (!rows.length) { const li = document.createElement('li'); li.className = 'c'; li.textContent = emptyText; ul.append(li); }
+  if (rows.length > limits[tab]) {
+    const li = document.createElement('li'); li.className = 'c'; li.style.justifyContent = 'center';
+    const more = document.createElement('button'); more.className = 'alt';
+    more.textContent = 'Show more (' + (rows.length - limits[tab]) + ' left)';
+    more.onclick = () => { limits[tab] += 50; tab === 'collection' ? renderList() : renderWish(); };
+    li.append(more); ul.append(li);
+  }
 }
-function matches(r, f) { return !f || (r.series + ' ' + r.publisher).toLowerCase().includes(f); }
+const limits = { collection: 50, wishlist: 50 };
+const cmp = (a, b) => String(a || '').localeCompare(String(b || ''), undefined, { numeric: true, sensitivity: 'base' });
+const SORTS = {
+  added: null,
+  title: (a, b) => cmp(a.series, b.series) || cmp(a.issue, b.issue),
+  publisher: (a, b) => cmp(a.publisher, b.publisher) || cmp(a.series, b.series) || cmp(a.issue, b.issue),
+  date: (a, b) => cmp(b.cover_date, a.cover_date)
+};
+function view(rows, filterId, sortId) {
+  const words = $(filterId).value.toLowerCase().split(/\s+/).filter(Boolean);
+  let out = rows.filter(r => {
+    const hay = [r.series, r.issue, r.variant, r.publisher, r.authors, r.notes, r.barcode, r.cover_date].join(' ').toLowerCase();
+    return words.every(w => hay.includes(w));
+  });
+  const s = SORTS[$(sortId).value];
+  return s ? out.slice().sort(s) : out;
+}
+function countLabel(shown, total) { return '(' + (shown === total ? total : shown + ' of ' + total) + ')'; }
 function renderList() {
-  const f = $('filter').value.toLowerCase();
-  $('count').textContent = '(' + collection.length + ')';
-  renderRows($('list'), collection.filter(r => matches(r, f)), 'collection', 'Nothing here yet. Scan your first comic.');
+  const rows = view(collection, 'filter', 'sort');
+  $('count').textContent = countLabel(rows.length, collection.length);
+  renderRows($('list'), rows, 'collection', 'Nothing here yet. Scan your first comic.');
 }
 function renderWish() {
-  const f = $('wfilter').value.toLowerCase();
-  $('wcount').textContent = '(' + wishlist.length + ')';
-  renderRows($('wlist'), wishlist.filter(r => matches(r, f)), 'wishlist', 'Nothing on your wishlist yet. Search a title and tap Add to wishlist.');
+  const rows = view(wishlist, 'wfilter', 'wsort');
+  $('wcount').textContent = countLabel(rows.length, wishlist.length);
+  renderRows($('wlist'), rows, 'wishlist', 'Nothing on your wishlist yet. Search a title and tap Add to wishlist.');
 }
+function resetList(tab) { limits[tab] = 50; tab === 'collection' ? renderList() : renderWish(); }
 async function enrichTab(tab, btn, msg) {
   btn.disabled = true; let start = 2, filled = 0;
   try {
@@ -484,15 +511,15 @@ $('disconnect').onclick = () => {
   collection = []; wishlist = []; renderList(); renderWish(); openGate();
 };
 
-const VERSION = '15';
+const VERSION = '16';
 $('ver').textContent = 'The Gutter \u00b7 version ' + VERSION;
 $('code').oninput = () => {
   if ($('code').value.trim()) return;
   results = []; owned = []; pendingCode = '';
   $('hits').textContent = ''; $('issueFilterBox').hidden = true; say('');
 };
-$('filter').oninput = renderList;
-$('wfilter').oninput = renderWish;
+$('filter').oninput = $('sort').onchange = () => resetList('collection');
+$('wfilter').oninput = $('wsort').onchange = () => resetList('wishlist');
 loadList(); loadWishlist();
 </script>
 </body>
