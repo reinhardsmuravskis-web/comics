@@ -59,6 +59,13 @@ details.sec #count,details.sec #wcount{font:400 1rem system-ui,sans-serif;color:
 .tool>b{display:block;margin-bottom:4px}
 .tool .msg{margin:4px 0 8px;min-height:0}
 #ver{text-align:center;color:var(--mute);font-size:.75rem;margin:24px 0 8px}
+.gate{position:fixed;inset:0;z-index:100;display:flex;align-items:center;justify-content:center;padding:max(16px,env(safe-area-inset-top)) 16px max(16px,env(safe-area-inset-bottom));background:rgba(8,3,20,.88);-webkit-backdrop-filter:blur(6px);backdrop-filter:blur(6px);overflow:auto}
+.gate[hidden]{display:none}
+.gate .card{width:100%;max-width:420px;background:var(--card);border:1px solid #5a1f8f;border-radius:14px;padding:22px 20px;box-shadow:0 0 0 1px rgba(255,46,151,.12),0 0 40px rgba(255,46,151,.22)}
+.gate h2{font:400 2.6rem/1.2 Yellowtail,"Brush Script MT",cursive;margin:0 0 4px;text-align:center;color:#ffe0f0;text-shadow:0 0 3px #ff4fa8,0 0 10px rgba(255,46,151,.7),0 0 22px rgba(255,46,151,.45)}
+.gate p{color:var(--mute);margin:0 0 6px;text-align:center}
+.gate .msg.err{color:var(--bad)}
+.gate button{width:100%;margin-top:14px}
 </style>
 </head>
 <body>
@@ -101,7 +108,7 @@ details.sec #count,details.sec #wcount{font:400 1rem system-ui,sans-serif;color:
 <label for="url">Apps Script web app URL</label><input id="url" inputmode="url" autocomplete="off">
 <label for="token">Token</label><input id="token" type="password" autocomplete="off">
 <p class="msg">Stored only in this browser.</p>
-<button id="saveSet">Save connection</button></div>
+<div class="btns"><button id="saveSet">Save connection</button><button class="alt" id="disconnect">Disconnect</button></div></div>
 <div class="tool"><b>Fill in missing details</b>
 <p class="msg">Looks up publishers and authors for entries that lack them. Keep this page open until it says Done.</p>
 <div class="btns"><button class="alt" id="enrichCol">Collection</button><button class="alt" id="enrichWish">Wishlist</button></div>
@@ -116,6 +123,16 @@ details.sec #count,details.sec #wcount{font:400 1rem system-ui,sans-serif;color:
 </details>
 <footer id="ver"></footer>
 </main>
+<div class="gate" id="gate" role="dialog" aria-modal="true" aria-labelledby="gateTitle" hidden>
+<div class="card">
+<h2 id="gateTitle">The Gutter</h2>
+<p>Connect to your Google Sheet to get started.</p>
+<label for="gateUrl">Apps Script web app URL</label><input id="gateUrl" inputmode="url" autocomplete="off" autocapitalize="off" spellcheck="false">
+<label for="gateToken">Token</label><input id="gateToken" type="password" autocomplete="off">
+<div id="gateMsg" class="msg" role="status"></div>
+<button id="gateGo">Connect</button>
+</div>
+</div>
 
 <script src="https://cdn.jsdelivr.net/npm/@ericblade/quagga2@1.8.4/dist/quagga.min.js"></script>
 <script>
@@ -125,7 +142,7 @@ const store = { get: k => { try { return localStorage.getItem(k) || '' } catch (
 let results = [], owned = [], collection = [], wishlist = [], pendingCode = '';
 
 $('url').value = store.get('url'); $('token').value = store.get('token');
-if (!store.get('url')) $('toolsBox').open = true;
+if (!store.get('url') || !store.get('token')) openGate();
 $('saveSet').onclick = () => { store.set('url', $('url').value.trim()); store.set('token', $('token').value.trim()); say('Connection saved.'); loadList(); loadWishlist(); };
 
 function say(t, err) { $('msg').textContent = t; $('msg').className = 'msg' + (err ? ' err' : ''); }
@@ -135,6 +152,7 @@ async function api(action, params = {}) {
   u.search = new URLSearchParams({ action, token: store.get('token'), ...params });
   const r = await fetch(u);
   const j = await r.json();
+  if (j.error === 'Bad token' && $('gate').hidden) openGate('The token was not accepted. Enter it again.');
   if (j.error) throw new Error(j.error);
   return j;
 }
@@ -150,7 +168,7 @@ function showResults(j, label) {
 }
 
 async function lookup(code) {
-  if (!store.get('url')) { $('toolsBox').open = true; return say('Add your connection first.', true); }
+  if (!store.get('url')) { openGate(); return; }
   say('Looking up ' + code + '...'); $('hits').textContent = ''; $('issueFilterBox').hidden = true; pendingCode = '';
   try {
     const j = await api('lookup', { code });
@@ -273,7 +291,7 @@ $('mFind').onclick = async () => {
 };
 
 async function search(q) {
-  if (!store.get('url')) { $('toolsBox').open = true; return say('Add your connection first.', true); }
+  if (!store.get('url')) { openGate(); return; }
   say('Searching for "' + q + '"...'); $('hits').textContent = ''; $('issueFilterBox').hidden = true;
   try {
     const j = await api('search', { q });
@@ -429,7 +447,44 @@ $('backup').onclick = async () => {
   btn.disabled = false;
 };
 
-const VERSION = '14';
+// ---- connection pop-up ----
+function openGate(msg) {
+  $('gate').hidden = false;
+  document.querySelector('main').setAttribute('inert', '');
+  $('gateUrl').value = store.get('url'); $('gateToken').value = store.get('token');
+  const m = $('gateMsg'); m.textContent = msg || ''; m.className = 'msg' + (msg ? ' err' : '');
+  setTimeout(() => $('gateUrl').focus(), 50);
+}
+function closeGate() { $('gate').hidden = true; document.querySelector('main').removeAttribute('inert'); }
+async function connect() {
+  const url = $('gateUrl').value.trim(), token = $('gateToken').value.trim(), m = $('gateMsg');
+  const fail = t => { m.textContent = t; m.className = 'msg err'; };
+  if (!/^https:\/\/script\.google\.com\/.+\/exec$/.test(url)) return fail('That does not look like a web app URL. It should start with https://script.google.com and end with /exec.');
+  if (!token) return fail('Enter your token.');
+  const old = [store.get('url'), store.get('token')];
+  store.set('url', url); store.set('token', token);
+  $('gateGo').disabled = true; m.textContent = 'Connecting...'; m.className = 'msg';
+  try { await api('list'); }
+  catch (e) {
+    store.set('url', old[0]); store.set('token', old[1]);
+    $('gateGo').disabled = false;
+    return fail(e.message === 'Bad token' ? 'The token was not accepted. Check it and try again.'
+      : /fetch|network|load failed/i.test(e.message) ? 'Could not reach the script. Check the URL, and that it is deployed with access set to Anyone.' : e.message);
+  }
+  $('gateGo').disabled = false;
+  $('url').value = url; $('token').value = token;
+  closeGate(); say('Connected.'); loadList(); loadWishlist();
+}
+$('gateGo').onclick = connect;
+$('gateToken').onkeydown = e => { if (e.key === 'Enter') connect(); };
+$('gateUrl').onkeydown = e => { if (e.key === 'Enter') $('gateToken').focus(); };
+$('disconnect').onclick = () => {
+  if (!confirm('Disconnect this device? Your Sheet is not changed.')) return;
+  store.set('url', ''); store.set('token', ''); $('url').value = ''; $('token').value = '';
+  collection = []; wishlist = []; renderList(); renderWish(); openGate();
+};
+
+const VERSION = '15';
 $('ver').textContent = 'The Gutter \u00b7 version ' + VERSION;
 $('code').oninput = () => {
   if ($('code').value.trim()) return;
