@@ -315,7 +315,9 @@ $('go').onclick = () => {
 $('code').onkeydown = e => { if (e.key === 'Enter') $('go').click(); };
 
 let live = false;
-const READERS = ['ean_reader', 'upc_reader', 'ean_8_reader', 'upc_e_reader'];
+// Comics carry UPC-A (12 digits) or EAN-13 (ISBN). The short 8-digit readers only produced false partial reads.
+const READERS = ['ean_reader', 'upc_reader'];
+const validCode = c => /^\d{12,13}$/.test(String(c || ''));
 function stopCam() {
   if (live) { try { Quagga.stop(); } catch (e) {} live = false; }
   $('reader').textContent = ''; $('cam').textContent = 'Scan with camera';
@@ -329,13 +331,15 @@ function startCam() {
   const hits = {};
   Quagga.offDetected();
   Quagga.onDetected(r => {
-    const c = r.codeResult.code; hits[c] = (hits[c] || 0) + 1;
+    const c = r.codeResult.code;
+    if (!validCode(c)) return;
+    hits[c] = (hits[c] || 0) + 1;
     if (hits[c] >= 2) accept(c, true);
   });
   Quagga.init({
     inputStream: { type: 'LiveStream', target: $('reader'),
       constraints: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } },
-      area: { top: '25%', bottom: '25%', left: '5%', right: '5%' } },
+      area: { top: '0%', bottom: '0%', left: '0%', right: '0%' }, size: 800 },
     decoder: { readers: READERS }, locate: true, numOfWorkers: 0, frequency: 10
   }, err => {
     if (err) { stopCam(); return say('Camera unavailable: ' + err, true); }
@@ -354,7 +358,7 @@ $('photo').onchange = async e => {
     found = await new Promise(res => Quagga.decodeSingle({
       src: url, numOfWorkers: 0, inputStream: { size: t.s },
       locator: { patchSize: t.p, halfSample: false }, decoder: { readers: READERS }, locate: true
-    }, r => res(r && r.codeResult ? r.codeResult.code : null)));
+    }, r => res(r && r.codeResult && validCode(r.codeResult.code) ? r.codeResult.code : null)));
     if (found) break;
   }
   URL.revokeObjectURL(url); e.target.value = '';
@@ -515,7 +519,7 @@ $('disconnect').onclick = () => {
   collection = []; wishlist = []; renderList(); renderWish(); openGate();
 };
 
-const VERSION = '17';
+const VERSION = '19';
 $('ver').textContent = 'The Gutter \u00b7 version ' + VERSION;
 $('code').oninput = () => {
   if ($('code').value.trim()) return;
