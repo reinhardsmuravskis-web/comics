@@ -79,7 +79,7 @@ select{font:inherit;color:inherit;background:var(--bg);border:1px solid var(--li
 <div class="row"><input id="code" type="search" enterkeyhint="search" autocomplete="off" placeholder="Scan, or type e.g. Gotham by Gaslight"><button id="go" style="flex:0 0 auto">Search</button></div>
 <div class="row" style="margin-top:8px"><button class="alt" id="cam">Scan with camera</button><button class="alt" id="manual">Enter by hand</button></div>
 <div class="row" style="margin-top:8px"><button class="alt" id="photoBtn">Scan from a photo</button></div>
-<input id="photo" type="file" accept="image/*" capture="environment" hidden>
+<input id="photo" type="file" accept="image/*" hidden>
 <div id="reader"></div>
 <div id="msg" class="msg" role="status"></div>
 <div id="issueFilterBox" hidden><label for="issueFilter">Issue number (the add-on code is not read, so narrow it here)</label><input id="issueFilter" inputmode="numeric"></div>
@@ -211,21 +211,27 @@ function renderHits() {
 }
 $('issueFilter').oninput = renderHits;
 
+let saving = false;
 async function save(row, force, tab) {
+  if (saving) return;            // ignore a second tap while the first is still being saved
+  saving = true; say('Saving...');
   tab = tab || 'collection';
   if (!row.barcode && pendingCode) row.barcode = pendingCode;
+  const rid = Math.random().toString(36).slice(2) + Date.now().toString(36);
   try {
-    const j = await api('add', { row: JSON.stringify(row), force: force ? '1' : '', tab });
+    const j = await api('add', { row: JSON.stringify(row), force: force ? '1' : '', tab, rid });
     if (j.duplicate) {
+      saving = false;
       const where = tab === 'wishlist' ? 'on your wishlist' : 'in your collection';
       if (confirm('You already have this one ' + where + '. Add it again?')) return save(row, true, tab);
-      return;
+      say(''); return;
     }
     say(tab === 'wishlist' ? 'Added to your wishlist.' : 'Saved.');
     $('hits').textContent = ''; $('code').value = ''; $('issueFilterBox').hidden = true; pendingCode = '';
     tab === 'wishlist' ? loadWishlist() : loadList();
     if (cameraMode) { startCam(); setTimeout(() => $('reader').scrollIntoView({ behavior: 'smooth', block: 'center' }), 300); }
   } catch (e) { say(e.message, true); }
+  finally { saving = false; }
 }
 
 let editing = null, editTab = 'collection';
@@ -519,7 +525,7 @@ $('disconnect').onclick = () => {
   collection = []; wishlist = []; renderList(); renderWish(); openGate();
 };
 
-const VERSION = '19';
+const VERSION = '20';
 $('ver').textContent = 'The Gutter \u00b7 version ' + VERSION;
 $('code').oninput = () => {
   if ($('code').value.trim()) return;
